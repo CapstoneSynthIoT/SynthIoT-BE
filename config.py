@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
 
     # Model Artifacts
-    MODEL_PATH: str = 'timegan_model.pkl'
-    SCALER_PATH: str = 'scaler.joblib'
+    MODEL_PATH: str = 'AI/timegan_model.pkl'
+    SCALER_PATH: str = 'AI/scaler.joblib'
 
 settings = Settings()

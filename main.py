@@ -2,8 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
-from agents import run_crew
-from tools import sys_instance, GenerationConfig # Import the generator instance and config model
+from AI.agents import run_crew
+from AI.tools import sys_instance, GenerationConfig # Import the generator instance and config model
 import json
 import io
 from fastapi.concurrency import run_in_threadpool
