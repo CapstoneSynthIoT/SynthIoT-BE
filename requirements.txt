@@ -1,0 +1,34 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+
+# Environment & Configuration
+python-dotenv
+pydantic-settings
+
+# Build tools (install first to avoid pkg_resources errors)
+setuptools>=65.0.0
+
+# AI/LLM Framework
+crewai>=1.9.0
+langchain-groq
+litellm
+
+# Data Processing - Pinned for ydata-synthetic compatibility
+pandas==1.5.3
+numpy==1.23.5
+
+# Machine Learning - Pinned for compatibility
+tensorflow==2.12.0
+keras==2.12.0
+ydata-synthetic==1.4.0
+joblib
+scikit-learn==1.3.2
+
+# Additional useful packages for production
+python-json-logger
+
+# Testing (optional, but recommended)
+pytest
+pytest-asyncio
+httpx
