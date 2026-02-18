@@ -1,79 +1,85 @@
 import os
+import time
 from crewai import Agent, Crew, Process, Task, LLM
 from dotenv import load_dotenv
+from crewai_tools import SerperDevTool
+from functools import lru_cache
+from AI.tools import GenerationConfig
 
 load_dotenv()
 
-# --- CONFIG ---
-# Configure Groq LLM for CrewAI
-# Using llama-3.3-70b-versatile (current supported model)
+# Check for keys to avoid silent crashes
+if not os.getenv("SERPER_API_KEY"):
+    raise ValueError("❌ SERPER_API_KEY not found in environment variables.")
+
 llm_groq = LLM(
-    model="groq/llama-3.3-70b-versatile",
+    model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-# --- AGENTS ---
+search_tool = SerperDevTool()
 
+# [OPTIMIZATION] Disable verbose logging to save tokens
 climate_agent = Agent(
-    role='Climate Context Specialist',
-    goal='Extract environmental parameters from natural language',
-    backstory='Meteorologist who converts descriptions to physics parameters.',
-    llm=llm_groq,
-    verbose=True
-)
-
-# FREE VERSION: Logic is hardcoded, no PDF tool needed
-sensor_agent = Agent(
-    role='Sensor Safety Engineer',
-    goal='Validate parameters against AM2320 limits',
+    role='Senior Meteorologist',
+    goal='Provide accurate, physics-compliant climate parameters.',
     backstory=(
-        "You are a Hardware Engineer. You know the AM2320 Sensor specs by heart: "
-        "Max Temperature: 80C (176F). "
-        "Max Humidity: 99.9%. "
-        "Min Temperature: -40C. "
-        "If the requested t_max is above 176F, you MUST clamp it to 176F."
+        "You are an expert Meteorologist. You use Search to find real weather data. "
+        "You DO NOT worry about sensor limits—the system handles safety checks automatically."
     ),
     llm=llm_groq,
-    verbose=True
+    tools=[search_tool], 
+    verbose=False  # <--- CHANGED to False
 )
 
-# --- WORKFLOW ---
-def run_crew(user_prompt: str):
-    # Task 1: Extraction
+def run_crew_logic(user_prompt: str):
     t1 = Task(
-        description=f"""Analyze: '{user_prompt}'. Extract to JSON with these exact fields:
-        - location: string (city name)
-        - t_min: number (minimum temperature in Fahrenheit)
-        - t_max: number (maximum temperature in Fahrenheit)
-        - humidity_base: number (base humidity as PERCENTAGE 0-100, e.g., 80 for 80% humidity)
-        - inertia: number (1-4, thermal inertia factor, default 2)
-        - noise_scale: number (0.1-2.0, noise amplitude, default 1.0)
-        - ac_status: boolean (true if AC is on, false otherwise)
-        - fan_status: boolean (true if fan is on, false otherwise)
-        - rain_status: boolean (true if raining, false otherwise)
-        - indoor_status: boolean (true if indoor, false if outdoor)
-        - start_time: string (YYYY-MM-DD HH:MM:SS format)
-        - end_time: string (YYYY-MM-DD HH:MM:SS format)
+        description=f"""Analyze: '{user_prompt}'.
         
-        CRITICAL: humidity_base must be 0-100 (e.g., 80 for 80% humidity, NOT 0.8).
-        Default to today 08:00-18:00 if time is missing.""",
+        1. **USER INTENT & OVERRIDES**:
+           - IF user asks for "N rows", extract 'row_count'.
+           - IF specific environment ("Oven", "Freezer"), use physics.
+           - ONLY search weather if City/Country mentioned AND no temps given.
+        
+        2. **SAFETY & PHYSICS (CRITICAL)**: 
+           - **MAX TEMP LIMIT**: The sensor fails above 176 F (80 C).
+           - IF user asks for > 176 F, you MUST clamp 't_max' to 176.
+           - Convert ALL Celsius to Fahrenheit: F = (C * 1.8) + 32.
+        
+        3. **DEFAULTS & FALLBACKS (CRITICAL)**: 
+           - FIRST: Use scientific domain knowledge. NEVER allow (t_max - t_min) to be less than 5.0 F (unless it is a strict cleanroom or oven).
+           - IF environment is vague: Use a MINIMUM 10.0 F range (e.g., t_min: 68.0, t_max: 78.0).
+           - IF completely generic ("sensor data"): Fallback to Chennai Context -> Location: 'Chennai', t_min: 78.0, t_max: 88.0, humidity_base: 70.0.
+           - 'noise_scale': 1.0 (normal), 0.1 (strict/museum), 2.0 (chaos).
+           - IF query mentions "rain", "storm", "wet", set 'rain_status': true.
+
+        OUTPUT: A single JSON object matching the GenerationConfig schema.
+        """,
         agent=climate_agent,
-        expected_output="Valid JSON string with all required fields in correct formats."
+        output_pydantic=GenerationConfig,
+        expected_output="Valid Pydantic Object"
     )
 
-    # Task 2: Validation (Rule Based)
-    t2 = Task(
-        description="""Review the JSON from the previous task. The AM2320 sensor has a maximum temperature limit of 176°F (80°C).
-        
-        Check if t_max > 176:
-        - If YES: Modify the JSON to set t_max = 176 (sensor safety limit)
-        - If NO: Return the JSON exactly as received, unchanged
-        
-        CRITICAL: Only modify t_max if it exceeds 176°F. Otherwise, preserve the original value.""",
-        agent=sensor_agent,
-        expected_output="JSON string with t_max validated against sensor limits (176°F max)."
-    )
-
-    # The crew's job is now to produce the final, validated JSON config.
-    crew = Crew(agents=[climate_agent, sensor_agent], tasks=[t1, t2], process=Process.sequential)
+    crew = Crew(agents=[climate_agent], tasks=[t1], process=Process.sequential)
     return crew.kickoff()
+# [NEW] Retry Wrapper
+@lru_cache(maxsize=50)  # Increased from 20 to protect against rate limits
+def run_crew_with_retry(user_prompt: str):
+    max_retries = 3
+    delay = 30 # Groq usually asks for ~20-25s
+    
+    for attempt in range(max_retries):
+        try:
+            return run_crew_logic(user_prompt)
+        except Exception as e:
+            error_str = str(e).lower()
+            if "rate_limit" in error_str or "429" in error_str:
+                print(f"⚠️ Rate Limit Hit. Waiting {delay}s before retry {attempt+1}/{max_retries}...")
+                time.sleep(delay)
+            elif "413" in error_str or "payload" in error_str:
+                 print("⚠️ Payload too large. Retrying with shortened prompt...")
+                 # Try with a truncated prompt to reduce context
+                 return run_crew_logic(user_prompt[:50])
+            else:
+                raise e
+    raise Exception("Max retries exceeded")

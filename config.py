@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     # LLM Provider
     GROQ_API_KEY: str
+    SERPER_API_KEY: str
 
     # Model Artifacts
     MODEL_PATH: str = 'AI/timegan_model.pkl'

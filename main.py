@@ -1,11 +1,17 @@
 from fastapi import FastAPI, HTTPException
+import logging
+
+# Setup Logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SynthIoT")
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
-from AI.agents import run_crew
-from AI.tools import sys_instance, GenerationConfig # Import the generator instance and config model
+from AI.agents import run_crew_with_retry
+from AI.tools import get_system_instance, GenerationConfig # Import the generator instance and config model
 import json
 import io
+import pandas as pd
 from fastapi.concurrency import run_in_threadpool
 
 app = FastAPI()
@@ -41,41 +47,43 @@ async def generate_and_stream_data(request: PromptRequest):
     try:
         # The AI Crew's job is to return a validated JSON string.
         # This is a CPU/IO-bound task, so we run it in a thread pool to not block the server.
-        crew_output = await run_in_threadpool(run_crew, request.prompt)
+        crew_output = await run_in_threadpool(run_crew_with_retry, request.prompt)
         
-        # Extract the raw string from CrewOutput object
-        # CrewAI returns a CrewOutput object, we need to get the raw output
-        raw_output = str(crew_output.raw)
+        # [THE FIX] No more JSON parsing!
+        # CrewAI automatically validated and parsed it into the Pydantic model.
+        config = crew_output.pydantic
         
-        # The output might be wrapped in markdown code blocks like ```json ... ```
-        # Extract just the JSON content
-        import re
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_output, re.DOTALL)
-        if json_match:
-            validated_json_string = json_match.group(1)
-        else:
-            # If no code blocks, assume the whole output is JSON
-            validated_json_string = raw_output.strip()
-        
-        # Parse the configuration from the AI's output
-        raw_config = json.loads(validated_json_string)
+        if not config:
+            raise ValueError("Agent failed to return a valid config object.")
 
-        # Validate and structure the config using Pydantic
-        try:
-            config = GenerationConfig.model_validate(raw_config)
-        except ValidationError as e:
-            # If the LLM output is malformed, return a helpful error
-            print(f"❌ LLM output validation error: {e}")
-            print(f"Raw config received: {raw_config}")
-            raise HTTPException(
-                status_code=422, # Unprocessable Entity
-                detail=f"Could not process the generated parameters. Validation failed: {e}"
-            )
+        # [NEW FIX] Safety Net for Vague Prompts
+        if not config.end_time and not config.row_count:
+            logger.warning("⚠️ No duration specified by Agent. Defaulting to 100 rows.")
+            config.row_count = 100
+
+        # [NEW] Deterministic Row Count Logic
+        if config.row_count and config.row_count > 0:
+            # Convert '30s' or '1min' to a Pandas Timedelta
+            try:
+                dt = pd.to_timedelta(config.time_interval)
+                start = pd.to_datetime(config.start_time)
+                
+                # Calculate Exact End Time: Start + ((N-1) * Interval)
+                # We subtract 1 because date_range is inclusive of start and end
+                end = start + (dt * (config.row_count - 1))
+                
+                # Update config
+                config.end_time = end.strftime('%Y-%m-%d %H:%M:%S')
+                logger.info(f"🧮 Calculated exact end_time: {config.end_time} for {config.row_count} rows.")
+            except Exception as e:
+                logger.warning(f"⚠️ Date Math Error: {e}. row_count logic failed.")
 
         # Generate the data using the main system instance
-        print(f"✅ Validated config: {config.model_dump()}")
-        df = await run_in_threadpool(sys_instance.generate, config)
-        print(f"✅ Generated {len(df)} data points")
+        # Generate the data using the main system instance
+        logger.info(f"✅ Validated config: {config.model_dump()}")
+        sys = get_system_instance()
+        df = await run_in_threadpool(sys.generate, config)
+        logger.info(f"✅ Generated {len(df)} data points")
 
         # Stream the response
         stream = io.StringIO()
@@ -89,9 +97,7 @@ async def generate_and_stream_data(request: PromptRequest):
         raise
     except Exception as e:
         # Print error to terminal for debugging
-        print(f"❌ Server Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"❌ Server Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
