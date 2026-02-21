@@ -177,7 +177,7 @@ class SynthIoTSystem:
             # Fallback: If filtering removed everything (rare), stick to original
             if len(df_synth) < n_points:
                 # print("⚠️ Warning: Rejection sampling yielded too few points. Using unfiltered data.")
-                df_synth = pd.DataFrame(real_data, columns=cols)
+                df_synth = pd.DataFrame(real_data, columns=['Temp', 'Hum', 'AC', 'Window', 'Fan', 'Rain', 'Coastal', 'Indoor'])
 
             # 3. Extract Noise via Rolling Average
             temp_series = df_synth['Temp'].reset_index(drop=True)

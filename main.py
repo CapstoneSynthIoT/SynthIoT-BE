@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 from AI.agents import run_crew_with_retry
 from AI.tools import get_system_instance, GenerationConfig # Import the generator instance and config model
+from AI.modify import ModifyRequest, process_modification_logic
 import json
 import io
 import pandas as pd
@@ -34,6 +35,7 @@ async def health_check():
         "message": "SynthIoT API is running",
         "endpoints": {
             "/generate": "POST - Generate synthetic IoT sensor data from natural language prompts",
+            "/modify": "POST - Fill a data gap with AI-generated, bridged sensor data",
             "/docs": "GET - Interactive API documentation"
         }
     }
@@ -99,6 +101,33 @@ async def generate_and_stream_data(request: PromptRequest):
         # Print error to terminal for debugging
         logger.error(f"❌ Server Error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/modify")
+async def modify_and_stream_data(request: ModifyRequest):
+    """
+    Fills a gap between two points with AI-generated, bridged data.
+    Delegates logic to modify.py.
+    """
+    try:
+        # 1. Call the logic module
+        df = await process_modification_logic(request)
+
+        # 2. Stream the result (Controller Responsibility)
+        stream = io.StringIO()
+        df.to_csv(stream, index=False)
+        response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
+        response.headers["Content-Disposition"] = "attachment; filename=modified_segment.csv"
+        return response
+
+    except ValueError as ve:
+        # Business logic errors (e.g. bad dates) -> 400 Bad Request
+        logger.warning(f"❌ Modification Validation Error: {ve}")
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        # System errors -> 500 Internal Server Error
+        logger.error(f"❌ Modification System Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn
