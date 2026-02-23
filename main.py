@@ -10,6 +10,8 @@ from pydantic import BaseModel, ValidationError
 from AI.agents import run_crew_with_retry
 from AI.tools import get_system_instance, GenerationConfig # Import the generator instance and config model
 from AI.modify import ModifyRequest, process_modification_logic
+from User.router import router as users_router
+from User.auth_router import router as auth_router
 import json
 import io
 import pandas as pd
@@ -24,6 +26,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(users_router)
+
 class PromptRequest(BaseModel):
     prompt: str
 
@@ -36,6 +41,9 @@ async def health_check():
         "endpoints": {
             "/generate": "POST - Generate synthetic IoT sensor data from natural language prompts",
             "/modify": "POST - Fill a data gap with AI-generated, bridged sensor data",
+            "/users/signup": "POST - Register a new user",
+            "/users/{user_id}": "GET/PUT/DELETE - Read, update, or delete a user",
+            "/users/": "GET - List all users (paginated)",
             "/docs": "GET - Interactive API documentation"
         }
     }
