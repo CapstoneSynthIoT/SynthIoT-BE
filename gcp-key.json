@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "synthiot-488411",
+  "private_key_id": "b45335698a09003715bcc9c22d146240c7fcf016",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDf/2QdXI1camxe\nl+gFHWkyB9TdaAKGliNS145paEh9lfSy/pBoQC5vIuaPaxV4UxgcoBeuaGopqGFB\nQTuuWs0OO12IN14muRyXduCa3NT62dmK5ngyrGzMNCk36Co9f7kfwxzNwesF42Y9\n4EuE93VkCo+sWfx200fjRzWEHNw3TJdV978/+cMbyc8wamwWUUPUJWywxE0ZvRoh\ngYKZOownwnDhg4mlXRdYgaY10/QBs2BKKY2yjJUwMx4fay7JDMWwwchyFM2Qt2AK\nGlD2R7phUnXMXUWDSBc2IKYP3CWx3sLz7Fp/qhf7kYBcmkzMsUCrBZkP/lQ7xGPa\n2ySGxtAfAgMBAAECggEABRdHXbl4RwTuMJowPkmEVgxChMOz5v4rkFrw1Cl4GE6b\nsKPDgXMP+xumdNUAuGrfDet/jkm2O/slNrf2VMigh3XG8u0bOTMU2MZtZWemeYsQ\n/Cyvx6sOj/eRhkFDEIHCIdwr3+tL3abk8HwUC1Iae2sYB9lFuSelJx+7siR7xs/u\nb/t0DDyVvajgefyYUhxEjjbLKCoyPdj5C7n9A40o4b2VOxm6sUUPxrEdrUicA0k0\nTlohpinrQKGUNf6DHxNWNivgSpPnjDs7rG1sbrFoWvdRGjDqbomzGRTo9Dy65n0Q\nolyEPaKlWRRQDPf+qtMQlFCwTI1XG5lD//gWsXx3eQKBgQDwijeNECS505ht9AgR\nGligNiFltHtOLiWjC9KEaFgdLa6TCYT+J88UPoK2SdeD5+aC7E9edya5YBjqYINx\nfCA1hCOnh+FcOLLEOk5qgt/0xv1cj5HRVTRChmkEIMZZ/fdYo0pWAxMj+yyobTBe\nDDEh/eXBPRZ1OWBJPSHqY9llVwKBgQDuZP3OYkDNbeXn1VYDjZ2bBuHY7nmQqIaN\n6LvXg3AmzwfBMiWYS385Mmt+2Un8c06cTeEPIKkS+XdL9397B5TyOX4qzicL6tUa\nXb6EuQpENOZRGALyVyG6mYt0tPYl5ZSNj5jkECjJmNCVX40OfjRtf8pndzB1Z+bh\nQdgMv/0meQKBgQCqmUz25lk11qXIbgh+oNH0pw+ew5ekhkQ5VHw1XpAH+ctUC69g\nVrme4Qrx4INS0VmCx7kvBZDYbxicumDfTyrE6fgjrNKgBrJ7S+Mr1bCjObKeQFEq\nR6Tt/chjnh8v2ljga8egI0QjA9TTi8V/HmSGeD3IhNv1vgDVUN9KDxEztwKBgACU\n/omic8YMnqMSQkN/9QKL4cFF08Ymoy11g//iskNl/f7awHy+snDRTrHgle2n2mlH\nR2ViDwec1E27LPR/8D0nJsez+SRuTlbiI7TvPrcr6eQIyvkMfWiXN1/xkShGhzZR\nQ25LG85iMSAsO4vtgvNBfJ0EDXo75rRmFMDzNwsBAoGAO2hFGhMZXUnxvQYdPFBp\nAQVllff03tVjWc+S3VZ0mv/vzQM+L/evdaZ1BNvFdsKuvx5OPZjUQ9JS9vZ6upqv\nVshj7Xoa4vajG+mc9WE3XHhZ7SSmdMfqR83f79OG7bnLl9QuABwQ3O06cxsAjw59\nscXwUgsEIu0XETfS1y0Z15g=\n-----END PRIVATE KEY-----\n",
+  "client_email": "synthiot@synthiot-488411.iam.gserviceaccount.com",
+  "client_id": "111767707842815773976",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/synthiot%40synthiot-488411.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

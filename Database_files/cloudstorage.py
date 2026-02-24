@@ -1,0 +1,26 @@
+import os
+from google.cloud import storage
+
+
+def upload_to_bucket(file_content: str, destination_blob_name: str) -> str:
+    """Uploads a string/CSV content to the GCS bucket and returns the public URL."""
+    bucket_name = os.getenv("GCP_BUCKET_NAME")
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_blob_name)
+    blob.upload_from_string(file_content, content_type="text/csv")
+    return f"https://storage.googleapis.com/{bucket_name}/{destination_blob_name}"
+
+
+def replace_in_bucket(file_bytes: bytes, blob_name: str) -> str:
+    """
+    Overwrites an existing GCS blob in-place with new bytes content.
+    The blob_name is the object path within the bucket (e.g. 'synthetic_data_abc123.csv').
+    Returns the same public URL (unchanged, since the blob name stays the same).
+    """
+    bucket_name = os.getenv("GCP_BUCKET_NAME")
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(file_bytes, content_type="text/csv")
+    return f"https://storage.googleapis.com/{bucket_name}/{blob_name}"
