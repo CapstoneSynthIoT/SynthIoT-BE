@@ -5,45 +5,101 @@ AI-powered synthetic IoT data generator using TimeGAN and CrewAI agents.
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.11 (required for ydata-synthetic compatibility)
-- Conda or Miniconda
-- GROQ API Key
+- Python 3.11
+- PostgreSQL (local or Cloud SQL)
+- [GROQ API Key](https://console.groq.com/keys)
+- [Serper API Key](https://serper.dev)
 
-### Setup
+### Local Setup
 
-1. **Clone and navigate to the backend directory:**
+1. **Clone the repo:**
    ```bash
-   cd backend
+   git clone https://github.com/your-org/SynthIoT-BE.git
+   cd SynthIoT-BE
    ```
 
-2. **Create environment and install dependencies:**
+2. **Create a virtual environment and install dependencies:**
    ```bash
-   # Option A: Use the setup script (recommended)
-   bash setup.sh
-   
-   # Option B: Manual setup
-   conda create -n synthiot_env python=3.11 -y
-   conda activate synthiot_env
-   pip install -r requirements.txt
+   python3 -m venv venv
+   source venv/bin/activate
+   bash install_requirements.sh
    ```
 
 3. **Configure environment variables:**
-   Create a `.env` file in the backend directory:
-   ```env
-   GROQ_API_KEY=your_groq_api_key_here
-   MODEL_PATH=timegan_model.pkl
-   SCALER_PATH=scaler.joblib
+   ```bash
+   cp .env.example .env
+   nano .env   # fill in your API keys and DATABASE_URL
    ```
 
-4. **Run the application:**
+4. **Run database migrations:**
+   ```bash
+   alembic upgrade head
+   ```
+
+5. **Start the server:**
    ```bash
    python main.py
    ```
 
 The API will be available at:
-- **API Endpoint:** http://localhost:8000
-- **Interactive Docs:** http://localhost:8000/docs
+- **API:** http://localhost:8000
+- **Docs:** http://localhost:8000/docs
 - **ReDoc:** http://localhost:8000/redoc
+
+---
+
+## ☁️ VM Deployment (Production)
+
+Deploy to any Ubuntu 22.04+ VM (GCP, AWS, Azure, DigitalOcean) with a **single command**.
+The `deploy.sh` script handles everything: system packages, Python venv, pip dependencies,
+`.env` setup, Alembic migrations, and a systemd service that auto-restarts on reboot.
+
+### Steps
+
+1. **SSH into your VM and clone the repo:**
+   ```bash
+   git clone https://github.com/your-org/SynthIoT-BE.git
+   cd SynthIoT-BE
+   ```
+
+2. **Fill in your secrets:**
+   ```bash
+   cp .env.example .env
+   nano .env   # set GROQ_API_KEY, SERPER_API_KEY, DATABASE_URL
+   ```
+
+3. **Run the deployment script:**
+   ```bash
+   bash deploy.sh
+   ```
+   This will prompt you if `.env` is missing and pause for you to fill it in.
+
+### Managing the Service
+
+```bash
+systemctl status synthiot       # check if running
+journalctl -u synthiot -f       # live logs
+systemctl restart synthiot      # restart after code changes
+systemctl stop synthiot         # stop
+```
+
+### Updating the App
+
+```bash
+git pull                        # pull latest code
+source ~/synthiot_venv/bin/activate
+bash install_requirements.sh   # update deps if requirements changed
+alembic upgrade head            # apply any new DB migrations
+systemctl restart synthiot      # restart the service
+```
+
+### GCP Cloud SQL
+
+If using Cloud SQL, set your `DATABASE_URL` in `.env` to the socket format:
+```env
+DATABASE_URL=postgresql://postgres:PASSWORD@/synthiot_db?host=/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME
+```
+Make sure the Cloud SQL Auth Proxy is running on the VM, or that the service account has Cloud SQL Client permissions.
 
 ## 📡 API Usage
 
@@ -104,16 +160,27 @@ User Prompt → Climate Agent → Sensor Agent → Validation → TimeGAN → CS
 
 ### Project Structure
 ```
-backend/
-├── main.py              # FastAPI application
-├── agents.py            # CrewAI agents
-├── tools.py             # Data generation logic
-├── config.py            # Configuration management
-├── requirements.txt     # Python dependencies
-├── setup.sh            # Setup automation script
-├── .env                # Environment variables (create this)
-├── timegan_model.pkl   # Pre-trained TimeGAN model
-└── scaler.joblib       # Data scaler
+SynthIoT-BE/
+├── main.py                  # FastAPI app (routes)
+├── config.py                # Pydantic settings (reads .env)
+├── requirements.txt         # Pinned Python dependencies
+├── install_requirements.sh  # Ordered pip install script
+├── deploy.sh                # One-shot VM deployment script
+├── synthiot.service         # Systemd unit file template
+├── alembic.ini              # Alembic config
+├── alembic/                 # DB migration scripts
+├── AI/
+│   ├── agents.py            # CrewAI agents
+│   ├── tools.py             # TimeGAN data generation
+│   ├── modify.py            # Gap-fill logic
+│   ├── timegan_model.pkl    # Pre-trained TimeGAN model
+│   └── scaler.joblib        # Data scaler
+├── Database_files/
+│   ├── database.py          # SQLAlchemy engine & session
+│   └── models.py            # ORM models
+├── User/                    # User-related routes
+├── .env.example             # Environment variable template
+└── .env                     # Your secrets (never commit!)
 ```
 
 ### Key Dependencies

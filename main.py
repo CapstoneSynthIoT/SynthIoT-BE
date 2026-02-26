@@ -10,12 +10,14 @@ from pydantic import BaseModel, ValidationError
 from AI.agents import run_crew_with_retry
 from AI.tools import get_system_instance, GenerationConfig # Import the generator instance and config model
 from AI.modify import ModifyRequest, process_modification_logic
-from User.router import router as users_router
-from User.auth_router import router as auth_router
 import json
 import io
+import uuid
 import pandas as pd
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
+from Database_files.cloudstorage import upload_to_bucket
+from User.projects import router as projects_router
 
 app = FastAPI()
 
@@ -26,8 +28,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
-app.include_router(users_router)
+# Routers
+app.include_router(projects_router)
 
 class PromptRequest(BaseModel):
     prompt: str
@@ -41,9 +43,6 @@ async def health_check():
         "endpoints": {
             "/generate": "POST - Generate synthetic IoT sensor data from natural language prompts",
             "/modify": "POST - Fill a data gap with AI-generated, bridged sensor data",
-            "/users/signup": "POST - Register a new user",
-            "/users/{user_id}": "GET/PUT/DELETE - Read, update, or delete a user",
-            "/users/": "GET - List all users (paginated)",
             "/docs": "GET - Interactive API documentation"
         }
     }
@@ -95,12 +94,23 @@ async def generate_and_stream_data(request: PromptRequest):
         df = await run_in_threadpool(sys.generate, config)
         logger.info(f"✅ Generated {len(df)} data points")
 
-        # Stream the response
+        # Serialize the DataFrame to CSV
         stream = io.StringIO()
         df.to_csv(stream, index=False)
-        response = StreamingResponse(iter([stream.getvalue()]), media_type="text/csv")
-        response.headers["Content-Disposition"] = "attachment; filename=synthetic_data.csv"
-        return response
+        csv_content = stream.getvalue()
+
+        # Upload to GCS and get back the public URL
+        blob_name = f"synthetic_data_{uuid.uuid4().hex}.csv"
+        gcs_url = await run_in_threadpool(upload_to_bucket, csv_content, blob_name)
+        logger.info(f"☁️ Uploaded to GCS: {gcs_url}")
+
+        # Return JSON with the GCS URL so the client can download the file
+        return JSONResponse(content={
+            "message": "Data generated and uploaded successfully.",
+            "rows": len(df),
+            "filename": blob_name,
+            "download_url": gcs_url,
+        })
 
     except HTTPException:
         # Re-raise HTTP exceptions
