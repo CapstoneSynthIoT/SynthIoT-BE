@@ -40,13 +40,13 @@ pip install SQLAlchemy==2.0.46 alembic==1.18.4 psycopg2-binary==2.9.11 \
 
 echo ""
 echo "🔐 Step 8: Installing authentication and security tools..."
-pip install bcrypt==5.0.0 PyJWT==2.11.0 cryptography==46.0.4
+pip install bcrypt==4.0.1 PyJWT==2.11.0 cryptography==46.0.4
 
 echo ""
 echo "🤖 Step 9: Installing AI/LLM frameworks..."
 pip install langchain-core==1.2.9 langchain-groq==1.1.2 langsmith==0.7.0 \
     crewai==1.9.3 crewai-tools==1.9.3 groq==0.37.1 openai==1.83.0 \
-    litellm==1.81.9 instructor==1.12.0 tiktoken==0.8.0
+    litellm==1.57.0 instructor==1.12.0 tiktoken==0.8.0
 
 echo ""
 echo "🧠 Step 10: Installing vector DB and embeddings tools..."

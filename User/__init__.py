@@ -1,1 +1,1 @@
-# User Module - Reserved for user-related functionality
+from User.router import router  # noqa: F401
