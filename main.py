@@ -18,6 +18,8 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from Database_files.cloudstorage import upload_to_bucket
 from User.projects import router as projects_router
+from User.auth_router import router as auth_router
+from User.router import router as users_router
 
 app = FastAPI()
 
@@ -30,6 +32,8 @@ app.add_middleware(
 
 # Routers
 app.include_router(projects_router)
+app.include_router(auth_router)
+app.include_router(users_router)
 
 class PromptRequest(BaseModel):
     prompt: str
