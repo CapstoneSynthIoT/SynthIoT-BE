@@ -132,7 +132,6 @@ class SynthIoTSystem:
 
         try:
             # 1. Rejection Sampling: Over-generate to filter for specific contexts
-            # We generate 3x the needed points to ensure we have enough data after filtering
             n_needed = n_points
             n_buffer = n_points * 3 
             n_sequences = (n_buffer // self.SEQUENCE_LENGTH) + 2
@@ -143,13 +142,10 @@ class SynthIoTSystem:
             flat_data = synth_data.reshape(-1, synth_data.shape[2])
             real_data = self.scaler.inverse_transform(flat_data)
             
-            # --- FIX: SLICE OFF EXTRA FEATURES ---
             # The Model generates 12 cols (including Season/Time), but we only need the first 8.
             real_data = real_data[:, :8]
-            # -------------------------------------
             
             # Columns: [Temp, Hum, AC, Window, Fan, Rain, Coastal, Indoor]
-            # Convert to DataFrame for easier filtering
             df_synth = pd.DataFrame({
                 'Temp': real_data[:, 0],
                 'Hum': real_data[:, 1],
@@ -164,19 +160,15 @@ class SynthIoTSystem:
             # Apply Filters (Latent Rejection Sampling)
             if config.ac_status:
                 df_synth = df_synth[df_synth['AC'] >= 0.5]
-            
             if config.fan_status:
                 df_synth = df_synth[df_synth['Fan'] >= 0.5]
-                
             if config.rain_status:
                 df_synth = df_synth[df_synth['Rain'] >= 0.5]
-                
             if config.indoor_status:
-                 df_synth = df_synth[df_synth['Indoor'] >= 0.5]
+                df_synth = df_synth[df_synth['Indoor'] >= 0.5]
 
-            # Fallback: If filtering removed everything (rare), stick to original
+            # Fallback: If filtering removed everything (rare), use unfiltered data
             if len(df_synth) < n_points:
-                # print("⚠️ Warning: Rejection sampling yielded too few points. Using unfiltered data.")
                 df_synth = pd.DataFrame(real_data, columns=['Temp', 'Hum', 'AC', 'Window', 'Fan', 'Rain', 'Coastal', 'Indoor'])
 
             # 3. Extract Noise via Rolling Average
@@ -186,15 +178,18 @@ class SynthIoTSystem:
             t_noise = (temp_series - temp_series.rolling(self.ROLLING_WINDOW, center=True).mean()).fillna(0).values
             h_noise = (hum_series - hum_series.rolling(self.ROLLING_WINDOW, center=True).mean()).fillna(0).values
             
-            # 4. Noise Amplification (Make it look like Real IoT Data)
-            # GANs are often too smooth. We multiply the residuals to match real sensor variance.
-            # CLAUDE'S FIX: Rebalance the signal-to-noise ratio
-            # Temp gets more variance (sensor jitter), Humidity gets less (preserves physics correlation)
-            t_noise *= 8.0   # Increased from 3.0 to simulate HVAC/hardware jitter
-            h_noise *= 8.0   # Decreased from 15.0 so it doesn't destroy the physics curve
+            # 4. Noise Amplification — scale proportionally to the config's temp range.
+            # A fixed multiplier (8.0) causes massive overshoots on narrow ranges (e.g. 18°F).
+            # Normalize noise to zero-mean/unit-variance, then scale so std dev is exactly
+            # 10% of the temp range: an 18°F range gets ±1.8°F noise, 100°F gets ±10°F.
+            t_noise_std = np.std(t_noise) if np.std(t_noise) > 0 else 1.0
+            h_noise_std = np.std(h_noise) if np.std(h_noise) > 0 else 1.0
+            target_temp_noise_std = max(0.5, (float(config.t_max) - float(config.t_min)) * 0.10)
+            target_hum_noise_std  = max(0.3, target_temp_noise_std * 0.5)
+            t_noise = (t_noise / t_noise_std) * target_temp_noise_std
+            h_noise = (h_noise / h_noise_std) * target_hum_noise_std
 
-            # Trim to exact length needed
-            # If we have shortage (due to aggressive filtering + fallback fail), repeat data
+            # Trim to exact length needed; tile if shortage due to aggressive filtering
             if len(t_noise) < n_points:
                 tile_n = (n_points // len(t_noise)) + 1
                 t_noise = np.tile(t_noise, tile_n)
@@ -237,12 +232,10 @@ class SynthIoTSystem:
         df = df.copy()
         n_rows = len(df)
         
-        # 80% chance of a flatline or dropped connection (NaN)
         if np.random.rand() < 0.80 and n_rows > 20: 
             start = np.random.randint(0, n_rows - 10)
             df.iloc[start:start+10, df.columns.get_loc(self.COL_TEMP)] = np.nan 
             
-        # 90% chance of a massive hardware spike
         if np.random.rand() < 0.90:
             spike = np.random.randint(0, n_rows)
             df.iloc[spike, df.columns.get_loc(self.COL_TEMP)] += 80.0
@@ -250,102 +243,94 @@ class SynthIoTSystem:
         return df
 
     def generate(self, config: GenerationConfig):
-        # 1. Robust Time Logic (From New Version)
+        # 1. Robust Time Logic
         try:
+            # Normalize start_time: strip ISO 8601 'T' separator if present
+            start_time_str = str(config.start_time).replace('T', ' ')
+
             if config.row_count and config.row_count > 0:
-                time_index = pd.date_range(start=config.start_time, periods=config.row_count, freq=config.time_interval)
+                time_index = pd.date_range(start=start_time_str, periods=config.row_count, freq=config.time_interval)
             elif config.end_time:
-                time_index = pd.date_range(start=config.start_time, end=config.end_time, freq=config.time_interval)
+                time_index = pd.date_range(start=start_time_str, end=config.end_time, freq=config.time_interval)
             else:
-                time_index = pd.date_range(start=config.start_time, periods=100, freq=config.time_interval)
+                time_index = pd.date_range(start=start_time_str, periods=100, freq=config.time_interval)
         except Exception:
             time_index = pd.date_range(start=pd.Timestamp.now(), periods=100, freq='30s')
             
         n_points = len(time_index)
         
         # 2. Physics Base
-        # ---------------------------------------------------------
-        # CLAUDE'S FIX: Enforce Minimum Signal-to-Noise Ratio
-        # ---------------------------------------------------------
         t_max_val = float(config.t_max)
         t_min_val = float(config.t_min)
         temp_range = t_max_val - t_min_val
         
-        # Enforce minimum 5°F range to preserve physics correlation.
-        # SMART SAFETY NET: Distinguish between legitimate scenarios and bad defaults
+        # Enforce minimum 5°F range to preserve physics correlation
         if temp_range <= 5.0:
-            
-            # CASE 1: OVEN - Very high temps, keep as-is
             if t_max_val >= 170.0:
-                pass
-            
-            # CASE 2: LEGITIMATE FREEZER - Negative temps or very low
+                pass  # CASE 1: OVEN — keep as-is
             elif t_min_val < 0 or (t_max_val > 0 and t_max_val < 35.0 and t_min_val < 20.0):
+                # CASE 2: LEGITIMATE FREEZER
                 center = (t_max_val + t_min_val) / 2.0
-                if temp_range < 3.0:  # Expand only very tight freezer ranges
+                if temp_range < 3.0:
                     config.t_min = center - 2.5
                     config.t_max = center + 2.5
-                # else: keep original (already has 3-5°F range)
-            
-            # CASE 3: BAD DEFAULT - Near-zero (agent returned garbage)
             elif abs(t_max_val) < 2.0 and abs(t_min_val) < 2.0:
+                # CASE 3: BAD DEFAULT — agent returned garbage
                 import logging
                 logging.getLogger("SynthIoT").warning(f"⚠️ Bad default detected (t_min={t_min_val}, t_max={t_max_val}). Defaulting to room temp.")
                 config.t_min = 67.0
                 config.t_max = 77.0
-            
-            # CASE 4: GENERIC LOW RANGE - Positive but suspiciously narrow
             else:
+                # CASE 4: GENERIC LOW RANGE
                 center = (t_max_val + t_min_val) / 2.0
-                # If center is unrealistically low (but not a freezer), default to room temp
                 if center < 40.0:
                     center = 72.0
                 config.t_min = center - 5.0
                 config.t_max = center + 5.0
-        # ---------------------------------------------------------
         
         # HUMIDITY SAFETY NET: Default to 60% if agent returns unrealistically low value
         if float(config.humidity_base) < 30.0:
             config.humidity_base = 60.0
         
-        # Use the raw config values for the true daily wave
         base_temp = self._generate_physics_trend(time_index, float(config.t_min), float(config.t_max), float(config.inertia))
         
-        # CLAUDE'S FIX: Apply Evaporative Cooling AFTER the trend is generated
         if config.rain_status:
             base_temp -= 5.0 
 
-        # 3. AI Texture (The Merged Magic)
+        # 3. AI Texture
         t_noise, h_noise = self._generate_fresh_texture(n_points, config)
         
-        # FINAL FIX: Adaptive Measurement Noise (Signal-to-Noise Ratio fix)
+        # Adaptive Measurement Noise
         temp_range = float(config.t_max) - float(config.t_min)
-        # Ensure range isn't negative if clamped, then calculate 8% noise scale
         measurement_noise_scale = max(0.3, max(0.0, temp_range) * 0.08) 
         measurement_noise = np.random.normal(0, measurement_noise_scale, n_points)
         
         final_temp = base_temp + (t_noise * float(config.noise_scale)) + measurement_noise
-        
-        # SAFETY CLAMP: Ensure generated values (after noise) do not exceed sensor limits
-        if float(config.t_max) >= 176.0:
-             final_temp = np.clip(final_temp, -float('inf'), 176.0)
-        
+
+        # HARD CLAMP: Always enforce config bounds + 2°F jitter buffer.
+        # Prevents wild GAN overshoots (e.g. -8°F when t_min=68°F) on every config.
+        t_min_val = float(config.t_min)
+        t_max_val = float(config.t_max)
+        buffer = 2.0
+        final_temp = np.clip(final_temp, t_min_val - buffer, t_max_val + buffer)
         
         # 4. Humidity Logic
-        # FIX: Prevent division-by-1e-6 explosion when min and max are clamped together
         if float(config.t_max) <= float(config.t_min):
-            norm_temp = 0.5  # Center the distribution if temperatures are identical
+            norm_temp = 0.5
         else:
             norm_temp = (final_temp - float(config.t_min)) / (float(config.t_max) - float(config.t_min))
-            
+            norm_temp = np.clip(norm_temp, 0.0, 1.0)
+
         hum_base = float(config.humidity_base)
-        if config.rain_status: hum_base = max(hum_base, 90.0)
-        
-        final_hum = hum_base - (norm_temp * self.HUMIDITY_TEMP_SENSITIVITY) + h_noise
-        
-        # EWMA Smoothing: Make humidity glide realistically like a physical gas
-        final_hum = pd.Series(final_hum).ewm(span=10).mean().values
-        
+        if config.rain_status:
+            hum_base = max(hum_base, 90.0)
+
+        # Sensitivity 8.0: humidity inversely correlates with temp but stays near base
+        HUM_TEMP_SENSITIVITY = 8.0
+        final_hum = hum_base - (norm_temp * HUM_TEMP_SENSITIVITY) + (h_noise * 3.0)
+
+        # EWMA span=5: preserves natural short-term variance
+        final_hum = pd.Series(final_hum).ewm(span=5).mean().values
         final_hum = np.clip(final_hum, self.MIN_HUMIDITY, self.MAX_HUMIDITY)
         
         # 5. DataFrame Construction
@@ -357,8 +342,6 @@ class SynthIoTSystem:
         df[self.COL_LOCATION] = config.location
 
         # NOTE: Anomaly injection is handled externally by main.py via _inject_planned_anomalies.
-        # _inject_sensor_faults is kept as a standalone utility but no longer called here.
-
         return df
 
 _sys_instance = None

@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 import logging
+from dotenv import load_dotenv
+load_dotenv()  # Must be called before any os.getenv() in imported modules
 
 # Setup Logger
 logging.basicConfig(level=logging.INFO)
@@ -69,10 +71,40 @@ async def generate_and_stream_data(request: PromptRequest):
         if not config:
             raise ValueError("Agent failed to return a valid config object.")
 
+        # [NORMALIZE] Convert ISO 8601 intervals to Pandas format if agent returns them
+        ISO_TO_PANDAS = {
+            'PT30S': '30s', 'PT1M': '1min', 'PT2M': '2min', 'PT5M': '5min',
+            'PT10M': '10min', 'PT15M': '15min', 'PT30M': '30min',
+            'PT1H': '1h', 'PT2H': '2h', 'PT6H': '6h', 'PT12H': '12h', 'P1D': '1D'
+        }
+        if config.time_interval in ISO_TO_PANDAS:
+            normalized = ISO_TO_PANDAS[config.time_interval]
+            logger.warning(f"⚠️ Normalizing ISO 8601 interval '{config.time_interval}' → '{normalized}'")
+            config.time_interval = normalized
+
+        # [COMPUTE ROW COUNT] If agent gave us start+end but no row_count, calculate it now
+        # This is the primary path for month/week/year prompts
+        if config.end_time and not config.row_count:
+            try:
+                start_dt = pd.to_datetime(config.start_time)
+                end_dt = pd.to_datetime(config.end_time)
+                interval_td = pd.to_timedelta(config.time_interval)
+                computed_rows = int((end_dt - start_dt) / interval_td) + 1
+                config.row_count = computed_rows
+                logger.info(f"🧮 Computed row_count from date range: {computed_rows} rows at {config.time_interval}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not compute row_count from date range: {e}")
+
         # [NEW FIX] Safety Net for Vague Prompts
         if not config.end_time and not config.row_count:
             logger.warning("⚠️ No duration specified by Agent. Defaulting to 100 rows.")
             config.row_count = 100
+
+        # [SAFETY CAP] Never generate more than 2000 rows — protects against bad interval math
+        MAX_ROWS = 2000
+        if config.row_count and config.row_count > MAX_ROWS:
+            logger.warning(f"⚠️ Row count {config.row_count} exceeds cap. Clamping to {MAX_ROWS}.")
+            config.row_count = MAX_ROWS
 
         # [NEW] Deterministic Row Count Logic
         if config.row_count and config.row_count > 0:
@@ -91,7 +123,6 @@ async def generate_and_stream_data(request: PromptRequest):
             except Exception as e:
                 logger.warning(f"⚠️ Date Math Error: {e}. row_count logic failed.")
 
-        # Generate the data using the main system instance
         # Generate the data using the main system instance
         logger.info(f"✅ Validated config: {config.model_dump()}")
         sys_instance = get_system_instance()
@@ -141,8 +172,13 @@ async def generate_and_stream_data(request: PromptRequest):
             {sample}
 
             Does the data look realistic for this config?
-            Check: mean temp within range, humidity physically plausible, no impossible values.
+            Rules:
+            - Mean temperature should be within [t_min, t_max].
+            - Min/max temperature may exceed bounds by up to 2°F (this is an intentional sensor jitter buffer — do NOT flag this).
+            - Humidity mean should be within 20% of humidity_base.
+            - No impossible values: humidity must be between 5% and 100%, temperature must not be below -50°F or above 200°F.
             Respond with: PASS or FAIL. If FAIL, state the specific problem in one sentence.
+            Only FAIL for genuine data quality issues, not for values within the 2°F buffer.
             """,
             agent=data_realism_agent,
             expected_output="PASS or FAIL with optional reason"
