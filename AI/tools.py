@@ -206,6 +206,33 @@ class SynthIoTSystem:
             white_noise = np.random.normal(0, 1, n_points)
             return white_noise * 0.5, white_noise * 0.5
 
+    def _inject_planned_anomalies(self, df: pd.DataFrame, plan) -> pd.DataFrame:
+        """Applies a structured AnomalyPlan to the dataframe."""
+        df = df.copy()
+        n = len(df)
+        temp_col = self.COL_TEMP
+
+        if plan.inject_spike and n > 5:
+            spike_idx = np.random.randint(0, n)
+            df.iloc[spike_idx, df.columns.get_loc(temp_col)] += plan.spike_magnitude
+
+        if plan.inject_dropout and plan.dropout_duration_rows > 0:
+            start = np.random.randint(0, max(1, n - plan.dropout_duration_rows))
+            end = min(start + plan.dropout_duration_rows, n)
+            df.iloc[start:end, df.columns.get_loc(temp_col)] = np.nan
+
+        if plan.inject_drift and plan.drift_rate_per_row != 0:
+            drift = np.arange(n) * plan.drift_rate_per_row
+            df[temp_col] = df[temp_col] + drift
+
+        if plan.inject_frozen and plan.frozen_duration_rows > 0:
+            start = np.random.randint(0, max(1, n - plan.frozen_duration_rows))
+            frozen_val = df.iloc[start, df.columns.get_loc(temp_col)]
+            end = min(start + plan.frozen_duration_rows, n)
+            df.iloc[start:end, df.columns.get_loc(temp_col)] = frozen_val
+
+        return df
+
     def _inject_sensor_faults(self, df):
         df = df.copy()
         n_rows = len(df)
@@ -328,10 +355,10 @@ class SynthIoTSystem:
         df[self.COL_TEMP] = np.round(final_temp, 2)
         df[self.COL_HUMIDITY] = np.round(final_hum, 1)
         df[self.COL_LOCATION] = config.location
-        
-        if config.sensor_faults:
-            df = self._inject_sensor_faults(df)
-            
+
+        # NOTE: Anomaly injection is handled externally by main.py via _inject_planned_anomalies.
+        # _inject_sensor_faults is kept as a standalone utility but no longer called here.
+
         return df
 
 _sys_instance = None

@@ -94,9 +94,63 @@ async def generate_and_stream_data(request: PromptRequest):
         # Generate the data using the main system instance
         # Generate the data using the main system instance
         logger.info(f"✅ Validated config: {config.model_dump()}")
-        sys = get_system_instance()
-        df = await run_in_threadpool(sys.generate, config)
+        sys_instance = get_system_instance()
+        df = await run_in_threadpool(sys_instance.generate, config)
         logger.info(f"✅ Generated {len(df)} data points")
+
+        # --- ANOMALY INJECTION (if user prompt implies faults) ---
+        realism_verdict = "NOT_RUN"
+        fault_keywords = ['fault', 'anomaly', 'anomalies', 'spike', 'dropout', 'failure', 'error', 'broken']
+        user_wants_faults = config.sensor_faults or any(k in request.prompt.lower() for k in fault_keywords)
+
+        if user_wants_faults:
+            from AI.agents import anomaly_injector_agent, AnomalyPlan
+            from crewai import Task, Crew, Process
+
+            anomaly_task = Task(
+                description=f"""
+                User prompt: '{request.prompt}'
+                The user wants sensor faults. Decide what anomalies make sense:
+                - spike: sudden temperature jump
+                - dropout: NaN values (sensor disconnected)
+                - drift: gradual temperature creep
+                - frozen: sensor stuck on one value
+                Output an AnomalyPlan JSON.
+                """,
+                agent=anomaly_injector_agent,
+                output_pydantic=AnomalyPlan,
+                expected_output="AnomalyPlan Pydantic object"
+            )
+            anomaly_crew = Crew(agents=[anomaly_injector_agent], tasks=[anomaly_task], process=Process.sequential)
+            anomaly_result = await run_in_threadpool(anomaly_crew.kickoff)
+            plan = anomaly_result.pydantic
+            if plan:
+                df = sys_instance._inject_planned_anomalies(df, plan)
+                logger.info(f"🔥 Anomalies injected: {plan.reasoning}")
+
+        # --- DATA REALISM CHECK ---
+        from AI.agents import data_realism_agent
+        from crewai import Task, Crew, Process
+
+        sample = df[['Temperature(F)', 'Humidity(%)']].describe().to_string()
+        realism_task = Task(
+            description=f"""
+            Config used: location={config.location}, t_min={config.t_min}, t_max={config.t_max}, humidity_base={config.humidity_base}
+
+            Generated data statistics:
+            {sample}
+
+            Does the data look realistic for this config?
+            Check: mean temp within range, humidity physically plausible, no impossible values.
+            Respond with: PASS or FAIL. If FAIL, state the specific problem in one sentence.
+            """,
+            agent=data_realism_agent,
+            expected_output="PASS or FAIL with optional reason"
+        )
+        realism_crew = Crew(agents=[data_realism_agent], tasks=[realism_task], process=Process.sequential)
+        realism_result = await run_in_threadpool(realism_crew.kickoff)
+        realism_verdict = str(realism_result.raw).strip()
+        logger.info(f"🔍 Realism Check: {realism_verdict}")
 
         # Serialize the DataFrame to CSV
         stream = io.StringIO()
@@ -114,6 +168,7 @@ async def generate_and_stream_data(request: PromptRequest):
             "rows": len(df),
             "filename": blob_name,
             "download_url": gcs_url,
+            "realism_check": realism_verdict,
         })
 
     except HTTPException:
