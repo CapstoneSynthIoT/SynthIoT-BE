@@ -6,16 +6,31 @@ from passlib.context import CryptContext
 from Database_files.models import User
 from User.schemas import UserCreate, UserUpdate
 
-# Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+import hashlib
+import secrets
 
 def hash_password(plain: str) -> str:
-    return pwd_context.hash(plain)
+    # Use PBKDF2-HMAC-SHA256 (built into Python, no passlib/bcrypt bugs)
+    salt = secrets.token_hex(16)
+    # 600,000 iterations is the OWASP recommendation for PBKDF2-HMAC-SHA256 as of 2023
+    key = hashlib.pbkdf2_hmac(
+        "sha256", plain.encode("utf-8"), salt.encode("utf-8"), 600_000
+    )
+    return f"pbkdf2_sha256$600000${salt}${key.hex()}"
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    try:
+        algo, iters_str, salt, key_hex = hashed.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        iters = int(iters_str)
+        key = hashlib.pbkdf2_hmac(
+            "sha256", plain.encode("utf-8"), salt.encode("utf-8"), iters
+        )
+        return secrets.compare_digest(key.hex(), key_hex)
+    except Exception:
+        return False
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────

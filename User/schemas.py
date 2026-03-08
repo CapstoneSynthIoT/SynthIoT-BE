@@ -8,6 +8,7 @@ class UserCreate(BaseModel):
     name: str
     email: EmailStr
     password: str
+    verification_token: str  # Must be obtained from POST /auth/verify-otp
     phone_num: Optional[str] = None
     location: Optional[str] = None
     bio: Optional[str] = None
@@ -49,3 +50,19 @@ class TokenResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str
+
+
+# ── Email OTP ─────────────────────────────────────────────────────────────────
+
+class OTPRequest(BaseModel):
+    email: EmailStr
+
+
+class OTPVerify(BaseModel):
+    email: EmailStr
+    otp: str  # The 6-digit code received by email
+
+
+class VerificationTokenResponse(BaseModel):
+    verification_token: str
+    message: str
