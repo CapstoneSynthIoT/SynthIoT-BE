@@ -44,13 +44,19 @@ def bridge_series(series: np.ndarray, start_val: float, end_val: float, coef: fl
     # 2. Create a weighting vector (0.0 to 1.0)
     weights = np.linspace(0, 1, n)
 
-    # 3. Apply Smoothing Coefficient (Curve the transition)
+    # 4. Create an influence curve (1.0 at edges, 0.0 in the middle)
+    # This prevents the anchors from dragging the whole series up/down when
+    # prompts like "Antarctica" are bordered by "Death Valley" anchors.
+    influence = np.abs(weights - 0.5) * 2.0
+    
+    # Apply Smoothing Coefficient to the influence dropoff
     if coef != 1.0:
-        weights = np.power(weights, coef)
-
-    # 4. Apply the interpolated adjustment
-    # Formula: Original[i] + (StartDiff * (1-w)) + (EndDiff * w)
-    adjustment = (diff_start * (1 - weights)) + (diff_end * weights)
+        influence = np.power(influence, coef)
+        
+    # 5. Apply the interpolated adjustment, multiplied by the fading influence
+    # Formula: (Original[i] + (StartDiff * (1-w)) + (EndDiff * w)) * fade
+    base_adjustment = (diff_start * (1 - weights)) + (diff_end * weights)
+    adjustment = base_adjustment * influence
 
     return series + adjustment
 

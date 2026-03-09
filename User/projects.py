@@ -106,6 +106,30 @@ def get_project(project_id: UUID, db: Session = Depends(get_db)):
     return project
 
 
+@router.get("/{project_id}/download_url")
+def get_project_download_url(project_id: UUID, db: Session = Depends(get_db)):
+    """Return a temporary signed URL to download the private CSV file."""
+    import datetime
+    import os
+    from Database_files.cloudstorage import _get_storage_client
+
+    project = db.query(Project).filter(Project.uuid == project_id).first()
+    if not project or not project.csv_link:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} or CSV not found.")
+
+    try:
+        blob_name = project.csv_link.split("/", maxsplit=4)[-1]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid csv_link format.")
+
+    client = _get_storage_client()
+    bucket = client.bucket(os.getenv("GCP_BUCKET_NAME"))
+    blob = bucket.blob(blob_name)
+    
+    signed_url = blob.generate_signed_url(version="v4", expiration=datetime.timedelta(hours=1), method="GET")
+    return {"download_url": signed_url}
+
+
 @router.patch("/{project_id}", response_model=ProjectResponse)
 def update_project(project_id: UUID, updates: ProjectUpdate, db: Session = Depends(get_db)):
     """
@@ -162,6 +186,15 @@ async def update_project_csv(project_id: UUID, file: UploadFile = File(...), db:
 
     file_bytes = await file.read()
     new_url = await run_in_threadpool(replace_in_bucket, file_bytes, blob_name)
+
+    # Count rows in the CSV (subtract 1 for the header) to update datapoints_count
+    try:
+        content_str = file_bytes.decode('utf-8')
+        # Filter out empty lines to get accurate row count
+        lines = [line for line in content_str.split('\n') if line.strip()]
+        project.datapoints_count = max(0, len(lines) - 1)
+    except Exception as e:
+        print(f"Warning: Could not count rows in uploaded CSV: {e}")
 
     # csv_link stays the same (same blob), but refresh last_active via a touch
     project.csv_link = new_url
