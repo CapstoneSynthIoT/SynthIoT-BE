@@ -4,13 +4,20 @@ from google.oauth2 import service_account
 
 
 def _get_storage_client() -> storage.Client:
-    """Create a GCS client using the service account key file from env."""
+    """Create a GCS client using the service account key file from env, or fallback to Cloud Run ADC."""
     key_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "gcp-key.json")
-    credentials = service_account.Credentials.from_service_account_file(
-        key_path,
-        scopes=["https://www.googleapis.com/auth/cloud-platform"],
-    )
-    return storage.Client(credentials=credentials)
+    
+    # If the JSON file exists (like on your local dev machine), use it
+    if os.path.exists(key_path):
+        credentials = service_account.Credentials.from_service_account_file(
+            key_path,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"],
+        )
+        return storage.Client(credentials=credentials)
+    
+    # Otherwise, we are running in Cloud Run! 
+    # Let Google automatically handle the authentication securely.
+    return storage.Client()
 
 
 def upload_to_bucket(file_content: str, destination_blob_name: str) -> str:
