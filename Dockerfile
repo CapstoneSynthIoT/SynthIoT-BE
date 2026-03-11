@@ -10,12 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the installation script FIRST so Docker caches it
-COPY install_requirements.sh .
-RUN chmod +x install_requirements.sh
-
-# Run the user's specific installation script to guarantee dependency order
-RUN ./install_requirements.sh
+# Copy requirements and install
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
 COPY . .
