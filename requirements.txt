@@ -3,13 +3,9 @@ aiohttp==3.13.3
 aiosignal==1.4.0
 aiosqlite==0.21.0
 alembic==1.18.4
-anaconda-anon-usage
-anaconda-auth
-anaconda-cli-base
 annotated-types
 anyio==4.12.1
 appdirs==1.4.4
-archspec
 attrs==25.4.0
 backoff==2.2.1
 beautifulsoup4==4.13.5
@@ -23,13 +19,6 @@ cfgv==3.5.0
 charset-normalizer
 chromadb==1.1.1
 click
-conda
-conda-anaconda-telemetry
-conda-anaconda-tos
-conda-content-trust
-conda-libmamba-solver
-conda-package-handling
-conda_package_streaming
 crewai
 crewai-tools
 cryptography
@@ -80,7 +69,6 @@ jsonschema-specifications==2025.9.1
 keyring
 kubernetes==35.0.0
 lancedb==0.5.7
-libmambapy
 litellm
 lxml==6.0.2
 Mako==1.3.10
@@ -88,7 +76,6 @@ markdown-it-py
 MarkupSafe==3.0.3
 mcp==1.23.3
 mdurl
-menuinst
 mmh3==5.2.0
 more-itertools
 mpmath==1.3.0
