@@ -1,0 +1,67 @@
+name: Deploy Backend to Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+env:
+  PROJECT_ID: synthiot-488411
+  REGION: us-central1
+  ARTIFACT_REPO: synthiot-repo
+  SERVICE_NAME: synthiot-be-service
+  IMAGE_NAME: synthiot-be
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # Provider injected automatically based on Google Cloud configuration
+          workload_identity_provider: 'projects/898383430388/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-actions-deployer@synthiot-488411.iam.gserviceaccount.com'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker to use Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build and Push Docker Image
+        run: |
+          IMAGE_URL=${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker build -t $IMAGE_URL .
+          docker push $IMAGE_URL
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REPO }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          # Environment Variables configured from GitHub Secrets
+          env_vars: |
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+            SERPER_API_KEY=${{ secrets.SERPER_API_KEY }}
+            OTP_SECRET=${{ secrets.OTP_SECRET }}
+            SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+            GCP_BUCKET_NAME=${{ secrets.GCP_BUCKET_NAME }}
+            SMTP_HOST=${{ secrets.SMTP_HOST }}
+            SMTP_PORT=${{ secrets.SMTP_PORT }}
+            SMTP_USER=${{ secrets.SMTP_USER }}
+            SMTP_FROM=${{ secrets.SMTP_FROM }}
+            MODEL_PATH=${{ secrets.MODEL_PATH }}
+            SCALER_PATH=${{ secrets.SCALER_PATH }}
