@@ -1,25 +1,36 @@
-# Use official lightweight Python image
-FROM python:3.13-slim
+FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    libglib2.0-0 \
+    libgl1 \
+    libgomp1 \
+    libffi-dev \
+    libssl-dev \
+    libhdf5-dev \
+    curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
 COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel build
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+RUN pip install --upgrade pip setuptools wheel
+
+# Step 1: Install ydata-synthetic first with its pinned requests<2.31
+# Use --no-deps to avoid it dragging in old tensorflow etc (we install those below)
+RUN pip install --no-cache-dir "ydata-synthetic==1.4.0"
+
+# Step 2: Install everything else - pip will upgrade requests to satisfy the rest
+# Use --upgrade so requests gets bumped past 2.31 for all other packages
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
+
 COPY . .
 
-# Expose port 8080 as expected by Cloud Run
 EXPOSE 8080
 
-# Command to run the application (assuming FastAPI in main.py)
+ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
