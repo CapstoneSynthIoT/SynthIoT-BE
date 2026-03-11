@@ -9,6 +9,7 @@ starlette==0.52.1
 SQLAlchemy==2.0.46
 alembic==1.18.4
 psycopg2-binary==2.9.11
+pg8000
 aiosqlite==0.21.0
 greenlet==3.3.2
 
