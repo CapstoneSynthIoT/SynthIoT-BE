@@ -1,18 +1,21 @@
 # Use official lightweight Python image
-FROM python:3.10-slim
+FROM python:3.13-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (needed for packages like psycopg2, numpy, etc.)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy the installation script FIRST so Docker caches it
+COPY install_requirements.sh .
+RUN chmod +x install_requirements.sh
+
+# Run the user's specific installation script to guarantee dependency order
+RUN ./install_requirements.sh
 
 # Copy the rest of the application
 COPY . .
