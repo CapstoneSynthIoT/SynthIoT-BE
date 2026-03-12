@@ -55,6 +55,15 @@ def change_password(db: Session, user: User, current_password: str, new_password
     db.commit()
 
 
+def reset_password(db: Session, email: str, new_password: str) -> None:
+    """Update password for a user identified by email (verification step handled by router)."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    user.password = hash_password(new_password)
+    db.commit()
+
+
 # ── Create ───────────────────────────────────────────────────────────────────
 
 def create_user(db: Session, data: UserCreate) -> User:

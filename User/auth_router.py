@@ -11,6 +11,7 @@ from User.schemas import (
     LoginRequest,
     TokenResponse,
     ChangePasswordRequest,
+    ResetPasswordRequest,
     OTPRequest,
     OTPVerify,
     VerificationTokenResponse,
@@ -118,6 +119,27 @@ def change_password(
     Verifies the current password before applying the new one.
     """
     service.change_password(db, current_user, data.current_password, data.new_password)
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(data: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Reset password using a verification token.
+    The token must have been obtained by verifying an OTP for this email.
+    """
+    # 1. Validate the verification token
+    verified_email = verify_verification_token(data.verification_token)
+
+    # 2. Match email
+    if verified_email.lower() != data.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token does not match the provided email address.",
+        )
+
+    # 3. Update password
+    service.reset_password(db, data.email, data.new_password)
+    return {"message": "Password reset successfully."}
 
 
 # ── Me (convenience) ──────────────────────────────────────────────────────────

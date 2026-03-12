@@ -27,7 +27,13 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://synthiot-488411.web.app",          
+        "https://synthiot.org",       # Add the root domain
+        "https://www.synthiot.org",   # Add the www subdomain
+        "http://localhost:3000",
+        "http://localhost:5173"
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )

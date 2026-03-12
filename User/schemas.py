@@ -66,3 +66,9 @@ class OTPVerify(BaseModel):
 class VerificationTokenResponse(BaseModel):
     verification_token: str
     message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    new_password: str
+    verification_token: str
