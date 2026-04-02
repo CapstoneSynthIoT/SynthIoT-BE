@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 import logging
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()  # Must be called before any os.getenv() in imported modules
 
@@ -19,11 +20,22 @@ import pandas as pd
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from Database_files.cloudstorage import upload_to_bucket
+from Database_files.database import create_tables
 from User.projects import router as projects_router
 from User.auth_router import router as auth_router
 from User.router import router as users_router
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run startup tasks before the app begins serving requests."""
+    logger.info("🚀 Starting up — ensuring database tables exist...")
+    create_tables()
+    logger.info("✅ Database tables verified.")
+    yield  # App runs here
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

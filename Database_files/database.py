@@ -16,6 +16,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def create_tables():
+    """Create all tables in the database if they don't already exist."""
+    # Import models here to ensure they are registered on the Base metadata
+    from Database_files import models  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+
+
 # Dependency to get DB session in FastAPI routes
 def get_db():
     db = SessionLocal()
