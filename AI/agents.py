@@ -2,15 +2,17 @@ import os
 import time
 import json
 import re
+import logging
 from crewai import Agent, Crew, Process, Task, LLM
 from dotenv import load_dotenv
 from crewai_tools import SerperDevTool
-from functools import lru_cache
 from AI.tools import GenerationConfig
 from pydantic import BaseModel
 from typing import List, Optional
 
 load_dotenv()
+
+logger = logging.getLogger("SynthIoT")
 
 # --- ANOMALY PLAN MODEL ---
 class AnomalyPlan(BaseModel):
@@ -28,102 +30,138 @@ class AnomalyPlan(BaseModel):
 if not os.getenv("SERPER_API_KEY"):
     raise ValueError("❌ SERPER_API_KEY not found in environment variables.")
 
+# ---------------------------------------------------------------------------
+# LLM FALLBACK CHAIN
+# Primary: Groq (fast, free but low RPM limit)
+# Fallback 1: Google Gemini Flash (very generous free tier: 15 RPM, 1M TPM)
+# Fallback 2: Cerebras (ultra-fast inference, free tier)
+# ---------------------------------------------------------------------------
 llm_groq = LLM(
     model="groq/meta-llama/llama-4-scout-17b-16e-instruct",
     api_key=os.getenv("GROQ_API_KEY")
 )
 
+llm_gemini = LLM(
+    model="gemini/gemini-1.5-flash",
+    api_key=os.getenv("GEMINI_API_KEY")
+) if os.getenv("GEMINI_API_KEY") else None
+
+llm_cerebras = LLM(
+    model="cerebras/llama3.1-8b",
+    api_key=os.getenv("CEREBRAS_API_KEY")
+) if os.getenv("CEREBRAS_API_KEY") else None
+
+# Ordered fallback list — only include LLMs whose keys are configured
+_LLM_FALLBACK_CHAIN = [llm for llm in [llm_groq, llm_gemini, llm_cerebras] if llm is not None]
+
 search_tool = SerperDevTool()
 
-# --- AGENT 1: Meteorologist ---
-climate_agent = Agent(
-    role='Senior Meteorologist',
-    goal='Provide accurate, physics-compliant climate parameters.',
-    backstory=(
-        "You are an expert Meteorologist. You use Search to find real weather data. "
-        "You DO NOT worry about sensor limits—the system handles safety checks automatically."
-    ),
-    llm=llm_groq,
-    tools=[search_tool],
-    verbose=False
-)
+# ---------------------------------------------------------------------------
+# Agent factories — agents are built with the active LLM at call time.
+# This lets the fallback chain swap the LLM without redefining global singletons.
+# ---------------------------------------------------------------------------
 
-# --- AGENT 2: Prompt Interpreter ---
-prompt_interpreter_agent = Agent(
-    role='IoT Data Prompt Specialist',
-    goal='Translate vague user prompts into concrete geographic, environmental, and time-range parameters.',
-    backstory=(
-        "You specialize in disambiguating vague requests like 'hot and humid' into "
-        "specific cities, seasons, and parameter ranges. You also extract explicit time spans "
-        "from the prompt (e.g. 'March month', 'last week', '7 days') and encode them as "
-        "concrete start_time, end_time, and time_interval values. "
-        "You output a refined, unambiguous prompt for the Meteorologist to act on."
-    ),
-    llm=llm_groq,
-    tools=[],
-    verbose=False
-)
-
-# --- AGENT 3: Unit Validator ---
-unit_validator_agent = Agent(
-    role='Climatology Unit Validator',
-    goal='Ensure all temperature values are correctly in Fahrenheit before data generation.',
-    backstory=(
-        "You are a precise unit conversion specialist. You receive climate parameters "
-        "and verify they are physically realistic for the given location and season. "
-        "You know that no inhabited city on Earth has average temps below 32°F except in polar/mountain extremes. "
-        "You convert Celsius to Fahrenheit when needed: F = (C × 1.8) + 32."
-    ),
-    llm=llm_groq,
-    tools=[],
-    verbose=False
-)
-
-# --- AGENT 4: Config Critic ---
-config_critic_agent = Agent(
-    role='IoT Config Sanity Checker',
-    goal='Flag and fix physically impossible GenerationConfig combinations before data is generated.',
-    backstory=(
-        "You review climate configs and catch nonsense combinations: humidity 95% in a desert, "
-        "t_min > t_max, freezing temps labeled as Chennai summer, etc. "
-        "You fix what you can and pass through what is valid."
-    ),
-    llm=llm_groq,
-    tools=[],
-    verbose=False
-)
-
-# --- AGENT 5: Data Realism Agent ---
-data_realism_agent = Agent(
-    role='Synthetic Data Realism Auditor',
-    goal='Verify that generated IoT data is statistically realistic for the given location and config.',
-    backstory=(
-        "You receive a sample of generated sensor data plus the config it was generated from. "
-        "You check: does the mean temperature match the expected range? Is humidity physically "
-        "correlated with temperature? Are there impossible values (negative humidity, 200°F)? "
-        "You return a verdict: PASS or FAIL with specific reasons."
-    ),
-    llm=llm_groq,
-    tools=[],
-    verbose=False
-)
-
-# --- AGENT 6: Anomaly Injector ---
-anomaly_injector_agent = Agent(
-    role='IoT Anomaly Injection Specialist',
-    goal='Decide what realistic anomalies to inject based on user intent.',
-    backstory=(
-        "You read the user's prompt and decide what faults make sense: sensor spike, dropout, "
-        "gradual drift, or frozen value. You output a structured anomaly plan "
-        "that the system will physically apply to the generated data."
-    ),
-    llm=llm_groq,
-    tools=[],
-    verbose=False
-)
+def _make_agents(llm: LLM):
+    """Build all agents using the specified LLM instance."""
+    climate = Agent(
+        role='Senior Meteorologist',
+        goal='Provide accurate, physics-compliant climate parameters.',
+        backstory=(
+            "You are an expert Meteorologist. You use Search to find real weather data. "
+            "You DO NOT worry about sensor limits—the system handles safety checks automatically."
+        ),
+        llm=llm,
+        tools=[search_tool],
+        verbose=False
+    )
+    prompt_interpreter = Agent(
+        role='IoT Data Prompt Specialist',
+        goal='Translate vague user prompts into concrete geographic, environmental, and time-range parameters.',
+        backstory=(
+            "You specialize in disambiguating vague requests like 'hot and humid' into "
+            "specific cities, seasons, and parameter ranges. You also extract explicit time spans "
+            "from the prompt (e.g. 'March month', 'last week', '7 days') and encode them as "
+            "concrete start_time, end_time, and time_interval values. "
+            "You output a refined, unambiguous prompt for the Meteorologist to act on."
+        ),
+        llm=llm,
+        tools=[],
+        verbose=False
+    )
+    unit_validator = Agent(
+        role='Climatology Unit Validator',
+        goal='Ensure all temperature values are correctly in Fahrenheit before data generation.',
+        backstory=(
+            "You are a precise unit conversion specialist. You receive climate parameters "
+            "and verify they are physically realistic for the given location and season. "
+            "You know that no inhabited city on Earth has average temps below 32°F except in polar/mountain extremes. "
+            "You convert Celsius to Fahrenheit when needed: F = (C × 1.8) + 32."
+        ),
+        llm=llm,
+        tools=[],
+        verbose=False
+    )
+    config_critic = Agent(
+        role='IoT Config Sanity Checker',
+        goal='Flag and fix physically impossible GenerationConfig combinations before data is generated.',
+        backstory=(
+            "You review climate configs and catch nonsense combinations: humidity 95% in a desert, "
+            "t_min > t_max, freezing temps labeled as Chennai summer, etc. "
+            "You fix what you can and pass through what is valid."
+        ),
+        llm=llm,
+        tools=[],
+        verbose=False
+    )
+    return prompt_interpreter, climate, unit_validator, config_critic
 
 
-def run_crew_logic(user_prompt: str):
+def _make_support_agents(llm: LLM):
+    """Build the realism auditor and anomaly injector agents."""
+    realism = Agent(
+        role='Synthetic Data Realism Auditor',
+        goal='Verify that generated IoT data is statistically realistic for the given location and config.',
+        backstory=(
+            "You receive a sample of generated sensor data plus the config it was generated from. "
+            "You check: does the mean temperature match the expected range? Is humidity physically "
+            "correlated with temperature? Are there impossible values (negative humidity, 200°F)? "
+            "You return a verdict: PASS or FAIL with specific reasons."
+        ),
+        llm=llm,
+        tools=[],
+        verbose=False
+    )
+    anomaly = Agent(
+        role='IoT Anomaly Injection Specialist',
+        goal='Decide what realistic anomalies to inject based on user intent.',
+        backstory=(
+            "You read the user's prompt and decide what faults make sense: sensor spike, dropout, "
+            "gradual drift, or frozen value. You output a structured anomaly plan "
+            "that the system will physically apply to the generated data."
+        ),
+        llm=llm,
+        tools=[],
+        verbose=False
+    )
+    return realism, anomaly
+
+
+# Convenience accessors used by main.py imports (built with primary LLM)
+# These are rebuilt per-request when fallback is active.
+def _get_primary_llm() -> LLM:
+    return _LLM_FALLBACK_CHAIN[0]
+
+_primary_realism, _primary_anomaly = _make_support_agents(_get_primary_llm())
+data_realism_agent = _primary_realism
+anomaly_injector_agent = _primary_anomaly
+
+
+def run_crew_logic(user_prompt: str, llm: LLM = None):
+    """Run the 4-agent config generation pipeline using the specified LLM."""
+    if llm is None:
+        llm = _get_primary_llm()
+
+    prompt_interpreter_agent, climate_agent, unit_validator_agent, config_critic_agent = _make_agents(llm)
 
     # TASK 1: Prompt Interpreter — clarify location AND extract duration
     t0 = Task(
@@ -295,23 +333,48 @@ def run_crew_logic(user_prompt: str):
     return result
 
 
-# Retry Wrapper
-@lru_cache(maxsize=50)
 def run_crew_with_retry(user_prompt: str):
-    max_retries = 3
-    delay = 30
+    """
+    Runs the crew with automatic LLM fallback on rate-limit errors.
 
-    for attempt in range(max_retries):
-        try:
-            return run_crew_logic(user_prompt)
-        except Exception as e:
-            error_str = str(e).lower()
-            if "rate_limit" in error_str or "429" in error_str:
-                print(f"⚠️ Rate Limit Hit. Waiting {delay}s before retry {attempt+1}/{max_retries}...")
-                time.sleep(delay)
-            elif "413" in error_str or "payload" in error_str:
-                print("⚠️ Payload too large. Retrying with shortened prompt...")
-                return run_crew_logic(user_prompt[:50])
-            else:
-                raise e
-    raise Exception("Max retries exceeded")
+    Strategy:
+      1. Try the primary LLM (Groq) up to 2 times with exponential backoff.
+      2. On continued 429s, switch to the next LLM in the fallback chain
+         (Gemini Flash, then Cerebras) without waiting.
+      3. Non-rate-limit errors always raise immediately.
+    """
+    is_rate_limit = lambda e: "rate_limit" in str(e).lower() or "429" in str(e).lower() or "rate limit" in str(e).lower()
+
+    for llm_idx, llm in enumerate(_LLM_FALLBACK_CHAIN):
+        llm_name = llm.model
+        max_attempts = 2  # 2 attempts per LLM before falling back
+        base_delay = 30
+
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"🤖 Using LLM: {llm_name} (attempt {attempt + 1}/{max_attempts})")
+                return run_crew_logic(user_prompt, llm=llm)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "413" in error_str or "payload" in error_str:
+                    logger.warning("⚠️ Payload too large. Retrying with shortened prompt...")
+                    return run_crew_logic(user_prompt[:50], llm=llm)
+                elif is_rate_limit(e):
+                    if attempt < max_attempts - 1:
+                        # Still have attempts left on this LLM — wait and retry
+                        delay = base_delay * (2 ** attempt)  # 30s, 60s
+                        logger.warning(f"⚠️ Rate limit on {llm_name}. Waiting {delay}s before retry...")
+                        time.sleep(delay)
+                    else:
+                        # All attempts exhausted on this LLM — try the next one
+                        next_llm = _LLM_FALLBACK_CHAIN[llm_idx + 1].model if llm_idx + 1 < len(_LLM_FALLBACK_CHAIN) else None
+                        if next_llm:
+                            logger.warning(f"🔄 {llm_name} rate-limited. Falling back to {next_llm}...")
+                        break  # break inner loop to advance to next LLM
+                else:
+                    raise  # Non-rate-limit error: fail immediately
+
+    raise Exception(
+        "All LLMs in the fallback chain are rate-limited. "
+        "Please wait 1–2 minutes and try again."
+    )
