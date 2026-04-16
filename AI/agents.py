@@ -46,7 +46,7 @@ llm_groq = LLM(
 # crash in CrewAI 1.10.1 / LiteLLM 1.83+ due to internal validation.
 try:
     llm_gemini = LLM(
-        model="gemini/gemini-2.0-flash"
+        model="gemini/gemini-2.5-flash"
     ) if os.getenv("GEMINI_API_KEY") else None
 except Exception as _gemini_err:
     logger.warning(f"⚠️ Could not initialize Gemini LLM (will skip): {_gemini_err}")
