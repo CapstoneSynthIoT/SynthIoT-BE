@@ -31,7 +31,6 @@ async def lifespan(app: FastAPI):
     """Run startup tasks before the app begins serving requests."""
     logger.info("🚀 Starting up — ensuring database tables exist...")
     create_tables()
-    logger.info("✅ Database tables verified.")
     yield  # App runs here
 
 
