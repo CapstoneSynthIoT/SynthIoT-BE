@@ -41,15 +41,25 @@ llm_groq = LLM(
     api_key=os.getenv("GROQ_API_KEY")
 )
 
-llm_gemini = LLM(
-    model="gemini/gemini-1.5-flash",
-    api_key=os.getenv("GEMINI_API_KEY")
-) if os.getenv("GEMINI_API_KEY") else None
+# NOTE: Do NOT pass api_key explicitly for Gemini — LiteLLM reads GEMINI_API_KEY
+# from the environment automatically. Passing it explicitly causes an import-time
+# crash in CrewAI 1.10.1 / LiteLLM 1.83+ due to internal validation.
+try:
+    llm_gemini = LLM(
+        model="gemini/gemini-2.0-flash"
+    ) if os.getenv("GEMINI_API_KEY") else None
+except Exception as _gemini_err:
+    logger.warning(f"⚠️ Could not initialize Gemini LLM (will skip): {_gemini_err}")
+    llm_gemini = None
 
-llm_cerebras = LLM(
-    model="cerebras/llama3.1-8b",
-    api_key=os.getenv("CEREBRAS_API_KEY")
-) if os.getenv("CEREBRAS_API_KEY") else None
+try:
+    llm_cerebras = LLM(
+        model="cerebras/llama3.1-8b",
+        api_key=os.getenv("CEREBRAS_API_KEY")
+    ) if os.getenv("CEREBRAS_API_KEY") else None
+except Exception as _cerebras_err:
+    logger.warning(f"⚠️ Could not initialize Cerebras LLM (will skip): {_cerebras_err}")
+    llm_cerebras = None
 
 # Ordered fallback list — only include LLMs whose keys are configured
 _LLM_FALLBACK_CHAIN = [llm for llm in [llm_groq, llm_gemini, llm_cerebras] if llm is not None]
@@ -151,9 +161,14 @@ def _make_support_agents(llm: LLM):
 def _get_primary_llm() -> LLM:
     return _LLM_FALLBACK_CHAIN[0]
 
-_primary_realism, _primary_anomaly = _make_support_agents(_get_primary_llm())
-data_realism_agent = _primary_realism
-anomaly_injector_agent = _primary_anomaly
+try:
+    _primary_realism, _primary_anomaly = _make_support_agents(_get_primary_llm())
+    data_realism_agent = _primary_realism
+    anomaly_injector_agent = _primary_anomaly
+except Exception as _agent_init_err:
+    logger.warning(f"⚠️ Could not pre-build support agents at import time: {_agent_init_err}")
+    data_realism_agent = None
+    anomaly_injector_agent = None
 
 
 def run_crew_logic(user_prompt: str, llm: LLM = None):
