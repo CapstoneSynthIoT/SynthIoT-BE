@@ -123,3 +123,13 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# GCP Credentials — NEVER commit these
+gcp-key.json
+*-key.json
+*.json.key
+service-account*.json
+credentials.json
+
+# Old version backups
+old version/
